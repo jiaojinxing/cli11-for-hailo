@@ -179,6 +179,12 @@ class CallForVersion : public Success {
         : CallForVersion("This should be caught in your main function, see examples", ExitCodes::Success) {}
 };
 
+class AutocompleteMsg : public ParseError {
+    CLI11_ERROR_DEF(ParseError, AutocompleteMsg)
+    AutocompleteMsg(const std::vector<std::string> &completions) :
+        AutocompleteMsg(detail::join(completions, "\n"), ExitCodes::Success) {}
+};
+
 /// Does not output a diagnostic in CLI11_PARSE, but allows main() to return with a specific error code.
 class RuntimeError : public ParseError {
     CLI11_ERROR_DEF(ParseError, RuntimeError)

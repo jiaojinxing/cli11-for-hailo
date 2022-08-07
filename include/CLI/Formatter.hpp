@@ -47,11 +47,12 @@ inline std::string Formatter::make_groups(const App *app, AppFormatMode mode) co
     // Options
     for(const std::string &group : groups) {
         std::vector<const Option *> opts = app->get_options([app, mode, &group](const Option *opt) {
-            return opt->get_group() == group                     // Must be in the right group
-                   && opt->nonpositional()                       // Must not be a positional
-                   && (mode != AppFormatMode::Sub                // If mode is Sub, then
-                       || (app->get_help_ptr() != opt            // Ignore help pointer
-                           && app->get_help_all_ptr() != opt));  // Ignore help all pointer
+            return opt->get_group() == group                         // Must be in the right group
+                   && opt->nonpositional()                           // Must not be a positional
+                   && (mode != AppFormatMode::Sub                    // If mode is Sub, then
+                       || (app->get_help_ptr() != opt                // Ignore help pointer
+                           && app->get_help_all_ptr() != opt         // Ignore help all pointer
+                           && app->get_autocomplete_ptr() != opt)); // Ignore auto-complete pointer
         });
         if(!group.empty() && !opts.empty()) {
             out << make_group(group, false, opts);

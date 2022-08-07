@@ -527,6 +527,17 @@ class Option : public OptionBase<Option> {
         throw OptionNotFound("Validator index is not valid");
     }
 
+    std::vector<std::string> get_completions(const std::string &str) const {
+        for(const auto &vali : validators_) {
+            auto completions = vali.get_completions(str);
+            // TODO: support multiple validators?
+            if(!completions.empty()) {
+                return completions;
+            }
+        }
+        return {};
+    }
+
     /// Sets required options
     Option *needs(Option *opt) {
         if(opt != this) {
@@ -781,9 +792,10 @@ class Option : public OptionBase<Option> {
     /// If all_options is false, pick just the most descriptive name to show.
     /// Use `get_name(true)` to get the positional name (replaces `get_pname`)
     std::string get_name(bool positional = false,  ///< Show the positional name
-                         bool all_options = false  ///< Show every option
+                         bool all_options = false,  ///< Show every option
+                         bool hidden = false ///< Show hidden option
     ) const {
-        if(get_group().empty())
+        if(!hidden && get_group().empty())
             return {};  // Hidden
 
         if(all_options) {

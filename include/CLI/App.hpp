@@ -162,6 +162,8 @@ class App {
     /// A pointer to a version flag if there is one
     Option *version_ptr_{nullptr};
 
+    Option *autocomplete_ptr_{nullptr};
+
     /// This is the formatter for help printing. Default provided. INHERITABLE (same pointer)
     std::shared_ptr<FormatterBase> formatter_{new Formatter()};
 
@@ -314,6 +316,9 @@ class App {
             config_formatter_ = parent_->config_formatter_;
             require_subcommand_max_ = parent_->require_subcommand_max_;
         }
+
+        // NOTE: OptionGroup does not have a parent so we must set it here
+        set_autocomplete_flag("--_autocomplete", "Autocomplete");
     }
 
   public:
@@ -324,6 +329,7 @@ class App {
     explicit App(std::string app_description = "", std::string app_name = "")
         : App(app_description, app_name, nullptr) {
         set_help_flag("-h,--help", "Print this help message and exit");
+        set_autocomplete_flag("--_autocomplete", "Autocomplete");
     }
 
     App(const App &) = delete;
@@ -782,6 +788,24 @@ class App {
         return version_ptr_;
     }
 
+    Option *set_autocomplete_flag(std::string name = "", const std::string &description = "") {
+        // TODO: redundant code? copy pasted from set_help_flag()
+        if(autocomplete_ptr_ != nullptr) {
+            remove_option(autocomplete_ptr_);
+            autocomplete_ptr_ = nullptr;
+        }
+
+        // Empty name will simply remove the flag
+        if(!name.empty()) {
+            autocomplete_ptr_ = add_option(name, description);
+            autocomplete_ptr_->configurable(false);
+            // Hide the flag
+            autocomplete_ptr_->group("");
+        }
+
+        return autocomplete_ptr_;
+    }
+
   private:
     /// Internal function for adding a flag
     Option *_add_flag_internal(std::string flag_name, CLI::callback_t fun, std::string flag_description) {
@@ -807,6 +831,67 @@ class App {
         opt->expected(0);
         opt->required(false);
         return opt;
+    }
+
+    std::vector<const Option *> _get_all_options(bool hidden) const {
+        std::vector<const Option *> opts;
+        __get_all_options(opts, hidden);
+        return opts;
+    }
+
+    void __get_all_options(std::vector<const Option *> &opts, bool hidden) const {
+        for(const Option_p &opt : options_) {
+            if(hidden || !opt->get_group().empty()) {
+                opts.push_back(opt.get());
+            }
+        }
+
+        // Handle Option Groups
+        for(const App *subcom : get_subcommands({})) {
+            // Skip hidden subcommands when requested
+            if(!hidden && subcom->get_group().empty()) {
+                continue;
+            }
+
+            // Handle Option Group
+            if(subcom->get_name().empty()) {
+                subcom->__get_all_options(opts, hidden);
+            }
+        }
+    }
+
+    std::vector<std::string> autocomplete_subcommand(const std::string &input) const {
+        std::vector<std::string> completions;
+
+        for(const Option *opt : _get_all_options(false)) {
+            // Complete non-positional options
+            if(opt->nonpositional()) {
+                completions.emplace_back(opt->get_name());
+            }
+            // Complete positional options
+            else {
+                // Complete positional option if not filled
+                // TODO: can count be more than 1? If so, support it?
+                if(opt->count() == 0) {
+                    return opt->get_completions(input);
+                }
+            }
+        }
+
+        // Complete subcommands (without OptionGroup)
+        for(const App *subcom : get_subcommands({})) {
+            // Skip hidden subcommands
+            if(subcom->get_group().empty()) {
+                continue;
+            }
+            // Skip Option Group
+            if(subcom->get_name().empty()) {
+                continue;
+            }
+            completions.emplace_back(subcom->get_name());
+        }
+
+        return completions;
     }
 
   public:
@@ -939,6 +1024,8 @@ class App {
             help_ptr_ = nullptr;
         if(help_all_ptr_ == opt)
             help_all_ptr_ = nullptr;
+        if(autocomplete_ptr_ == opt)
+            autocomplete_ptr_ = nullptr;
 
         auto iterator =
             std::find_if(std::begin(options_), std::end(options_), [opt](const Option_p &v) { return v.get() == opt; });
@@ -1329,6 +1416,11 @@ class App {
 
         if(e.get_name() == "CallForVersion") {
             out << e.what() << std::endl;
+            return e.get_exit_code();
+        }
+
+        if(e.get_name() == "AutocompleteMsg") {
+            out << e.what();
             return e.get_exit_code();
         }
 
@@ -1734,6 +1826,9 @@ class App {
     /// Get a pointer to the help all flag. (const)
     const Option *get_help_all_ptr() const { return help_all_ptr_; }
 
+    /// Get a pointer to the auto-complete flag.
+    const Option *get_autocomplete_ptr() const { return autocomplete_ptr_; }
+
     /// Get a pointer to the config option.
     Option *get_config_ptr() { return config_ptr_; }
 
@@ -2127,6 +2222,37 @@ class App {
         }
     }
 
+    void _process_autocomplete_flag(bool trigger_complete = false) const {
+        const Option *autocomplete_ptr = get_autocomplete_ptr();
+
+        if(autocomplete_ptr == nullptr)
+            return;
+
+        if(autocomplete_ptr->count() > 0)
+            trigger_complete = true;
+
+        // If there were parsed subcommands, call those. First subcommand wins if there are multiple ones.
+        if(!parsed_subcommands_.empty()) {
+            for(const App *sub : parsed_subcommands_)
+                sub->_process_autocomplete_flag(trigger_complete);
+
+        // Only the final subcommand should call for auto-complete.
+        } else if(trigger_complete) {
+            auto completions = autocomplete_subcommand(autocomplete_ptr->results_[0]);
+            throw AutocompleteMsg(completions);
+        }
+
+        auto autocomplete_opt_name = autocomplete_ptr->get_name(false, true, true);
+        // NOTE: We are checking hidden options and hidden Option Groups
+        for(const Option *opt : _get_all_options(true)) {
+            if(opt->nonpositional() && (opt->count() == 1) && (opt->results_[0] == autocomplete_opt_name)) {
+                // Note: Pass an empty string as input to auto-complete
+                auto completions = opt->get_completions("");
+                throw AutocompleteMsg(completions);
+            }
+        }
+    }
+
     /// Verify required options and cross requirements. Subcommands too (only if selected).
     void _process_requirements() {
         // check excludes
@@ -2268,11 +2394,13 @@ class App {
         } catch(const CLI::FileError &) {
             // callbacks and help_flags can generate exceptions which should take priority
             // over the config file error if one exists.
+            //TODO: call _process_autocomplete_flag();?
             _process_callbacks();
             _process_help_flags();
             throw;
         }
 
+        _process_autocomplete_flag();
         _process_callbacks();
         _process_help_flags();
 
@@ -2341,6 +2469,7 @@ class App {
             args = remaining_for_passthrough(false);
         } else if(parse_complete_callback_) {
             _process_env();
+            _process_autocomplete_flag();
             _process_callbacks();
             _process_help_flags();
             _process_requirements();
@@ -3001,6 +3130,10 @@ class App {
 
         if((help_ptr_ == opt) || (help_all_ptr_ == opt))
             throw OptionAlreadyAdded("cannot move help options");
+
+        // TODO: redundant?
+        if(autocomplete_ptr_ == opt)
+            throw OptionAlreadyAdded("cannot move auto-complete options");
 
         if(config_ptr_ == opt)
             throw OptionAlreadyAdded("cannot move config file options");

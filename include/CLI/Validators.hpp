@@ -94,6 +94,8 @@ class Validator {
     /// specify that a validator should not modify the input
     bool non_modifying_{false};
 
+    std::function<std::vector<std::string>(const std::string &)> autocomplete_func_{[](const std::string &) { return std::vector<std::string>{}; }};
+
   public:
     Validator() = default;
     /// Construct a Validator with just the description string
@@ -146,6 +148,12 @@ class Validator {
             return desc_function_();
         }
         return std::string{};
+    }
+    std::vector<std::string> get_completions(const std::string &str) const {
+        if(active_) {
+            return autocomplete_func_(str);
+        }
+        return {};
     }
     /// Specify the type string
     Validator &name(std::string validator_name) {
@@ -216,6 +224,8 @@ class Validator {
                 return s1 + s2;
         };
 
+        // TODO: support autocomplete_func_
+
         newval.active_ = (active_ & other.active_);
         newval.application_index_ = application_index_;
         return newval;
@@ -232,6 +242,9 @@ class Validator {
         const std::function<std::string(std::string &)> &f1 = func_;
         const std::function<std::string(std::string &)> &f2 = other.func_;
 
+        const std::function<std::vector<std::string>(const std::string &)> &acf1 = autocomplete_func_;
+        const std::function<std::vector<std::string>(const std::string &)> &acf2 = other.autocomplete_func_;
+
         newval.func_ = [f1, f2](std::string &input) {
             std::string s1 = f1(input);
             std::string s2 = f2(input);
@@ -239,6 +252,13 @@ class Validator {
                 return std::string();
 
             return std::string("(") + s1 + ") OR (" + s2 + ")";
+        };
+        newval.autocomplete_func_ = [acf1, acf2](const std::string &input) {
+            // Note: Not adding a delimiter since we are adding it after every completion word
+            auto completions1 = acf1(input);
+            auto completions2 = acf2(input);
+            completions1.insert(completions1.end(), completions2.begin(), completions2.end());
+            return completions1;
         };
         newval.active_ = (active_ & other.active_);
         newval.application_index_ = application_index_;
@@ -265,6 +285,9 @@ class Validator {
         };
         newval.active_ = active_;
         newval.application_index_ = application_index_;
+
+        // TODO: support autocomplete_func_
+
         return newval;
     }
 
@@ -353,6 +376,12 @@ class ExistingFileValidator : public Validator {
             }
             return std::string();
         };
+        autocomplete_func_ = [](const std::string &path) {
+            // TODO: return a special string (or a new CompletionOption object) indicating a file/dir so we will search
+            //   only when needed? Not sure if it will work well with the AND/OR/! validators...
+            (void) path;
+            return std::vector<std::string>{};
+        };
     }
 };
 
@@ -369,6 +398,26 @@ class ExistingDirectoryValidator : public Validator {
                 return "Directory is actually a file: " + filename;
             }
             return std::string();
+        };
+        autocomplete_func_ = [](const std::string &path) {
+            /*
+            Bash `complete` command cannot append a completion to a previous one, so we cannot write our own file/dir
+            completions without outputting the entire path (instead of just the new relative addition) as a match.
+            `readline` supports this special behavior only when working with files by setting
+            rl_filename_completion_desired. complete.c::printable_part() uses rl_filename_completion_desired to
+            cut the path and keep just the last part of it. One can set rl_filename_completion_desired by passing
+            COPT_FILENAMES as an option. For example, _filedir is passing "-o filenames".
+
+            For shell builtins source code, see https://www.gnu.org/software/bash/bash.html.
+            Some reading material about this topic:
+                https://unix.stackexchange.com/questions/462114/bash-completion-overwrites-current-word
+                https://stackoverflow.com/questions/3951628/showing-only-the-substrings-of-compreply-bash-completion-options-to-the-user
+                https://stackoverflow.com/questions/51254702/dont-replace-previous-input-if-only-the-substrings-of-compreply-bash-completion
+            */
+            // TODO: return a special string (or a new CompletionOption object) indicating a file/dir so we will search
+            //   only when needed? Not sure if it will work well with the AND/OR/! validators...
+            (void) path;
+            return std::vector<std::string>{};
         };
     }
 };
@@ -893,6 +942,16 @@ class CheckedTransformer : public Validator {
             }
 
             return "Check " + input + " " + tfunc() + " FAILED";
+        };
+
+        autocomplete_func_ = [mapping](const std::string &str) {
+            (void) str;
+            std::vector<std::string> completions;
+            for(const auto &completion : detail::smart_deref(mapping)) {
+                auto output_string = detail::value_string(detail::pair_adaptor<element_t>::first(completion));
+                completions.emplace_back(output_string);
+            }
+            return completions;
         };
     }
 
