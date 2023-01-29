@@ -921,7 +921,8 @@ class App {
         CLI::callback_t fun = [&flag_result](const CLI::results_t &res) {
             return CLI::detail::lexical_cast(res[0], flag_result);
         };
-        auto *opt = _add_flag_internal(flag_name, std::move(fun), std::move(flag_description));
+        auto *opt = _add_flag_internal(flag_name, std::move(fun), std::move(flag_description))
+            ->run_callback_for_default();
         return detail::default_flag_modifiers<T>(opt);
     }
 
