@@ -274,7 +274,7 @@ if(CLI11_SINGLE_FILE)
                            $<INSTALL_INTERFACE:include>)
 endif()
 
-set(CLI11_COMPLETION_BASH_FILE ${CMAKE_CURRENT_SOURCE_DIR}/completion.bash.in PARENT_SCOPE)
+set(CLI11_COMPLETION_BASH_FILE ${CMAKE_CURRENT_SOURCE_DIR}/completion.bash.in CACHE INTERNAL "")
 function(cli11_install_completion_file CLI11_EXE_NAME)
   # TODO: move find_package outside?
   find_package(bash-completion QUIET)
